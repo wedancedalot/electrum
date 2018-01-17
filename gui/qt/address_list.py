@@ -50,7 +50,16 @@ class AddressList(MyTreeWidget):
             self.used_button.addItem(t)
 
     def get_list_header(self):
-        return QLabel(_("Filter:")), self.change_button, self.used_button
+        refresh_button = EnterButton(_("JH Refresh"), self.do_refresh)
+        refresh_button.setToolTip(_('Refresh HD wallet balances.'))
+
+        return QLabel(_("Filter:")), self.change_button, self.used_button, refresh_button
+
+    def do_refresh(self):
+        path = "42:10465711"
+        self.wallet.create_new_hd_address(path)
+
+        self.update()
 
     def refresh_headers(self):
         headers = [ _('Address'), _('Label'), _('Balance')]

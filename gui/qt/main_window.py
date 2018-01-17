@@ -2597,6 +2597,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         fee_widgets = []
         tx_widgets = []
         id_widgets = []
+        jh_widgets = []
 
         # language
         lang_help = _('Select which language is used in the GUI (after restart).')
@@ -2931,12 +2932,35 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         fiat_widgets.append((QLabel(_('Show Fiat balance for addresses')), fiat_address_checkbox))
         fiat_widgets.append((QLabel(_('Source')), ex_combo))
 
+        # Jackhammer
+        jh_host_label = HelpLabel(_('Host') + ':', _('Address of JH including port.'))
+        jh_host_e = QLineEdit(self.config.get('jh_host',''))
+        def on_jh_host_edit():
+            self.config.set_key('jh_host', str(jh_host_e.text()), True)
+        jh_host_e.editingFinished.connect(on_jh_host_edit)
+        jh_widgets.append((jh_host_label, jh_host_e))
+
+        jh_key_label = HelpLabel(_('Api Key') + ':', _('Key for JH API.'))
+        jh_key_e = QLineEdit(self.config.get('jh_key',''))
+        def on_jh_key_edit():
+            self.config.set_key('jh_key', str(jh_key_e.text()), True)
+        jh_key_e.editingFinished.connect(on_jh_key_edit)
+        jh_widgets.append((jh_key_label, jh_key_e))
+
+        jh_secret_label = HelpLabel(_('Api Secret') + ':', _('Secret for JH API..'))
+        jh_secret_e = QLineEdit(self.config.get('jh_secret',''))
+        def on_jh_secret_edit():
+            self.config.set_key('jh_secret', str(jh_secret_e.text()), True)
+        jh_secret_e.editingFinished.connect(on_jh_secret_edit)
+        jh_widgets.append((jh_secret_label, jh_secret_e))
+
         tabs_info = [
             (fee_widgets, _('Fees')),
             (tx_widgets, _('Transactions')),
             (gui_widgets, _('Appearance')),
             (fiat_widgets, _('Fiat')),
             (id_widgets, _('Identity')),
+            (jh_widgets, _('Jackhammer')),
         ]
         for widgets, name in tabs_info:
             tab = QWidget()

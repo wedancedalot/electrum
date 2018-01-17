@@ -229,7 +229,13 @@ class Xpub:
                 self.xpub_change = xpub
             else:
                 self.xpub_receive = xpub
-        return self.get_pubkey_from_xpub(xpub, (n,))
+
+        # Fix to allow depth
+        if type(n) != tuple:
+            assert type(n) == int
+            n = (n,)
+
+        return self.get_pubkey_from_xpub(xpub, n)
 
     @classmethod
     def get_pubkey_from_xpub(self, xpub, sequence):

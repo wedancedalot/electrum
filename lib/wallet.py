@@ -174,6 +174,7 @@ class Abstract_Wallet(PrintError):
         self.use_change            = storage.get('use_change', True)
         self.multiple_change       = storage.get('multiple_change', False)
         self.labels                = storage.get('labels', {})
+        self.hd_paths              = storage.get('hd_paths', {})
         self.frozen_addresses      = set(storage.get('frozen_addresses',[]))
         self.history               = storage.get('addr_history',{})        # address -> list(txid, height)
 
@@ -330,6 +331,29 @@ class Abstract_Wallet(PrintError):
             self.storage.put('labels', self.labels)
 
         return changed
+
+    # FUNCTIONS SIMILAR TO SET/GET LABEL, BUT TO SAVE PATH FOR HD-KEY FROM JACKHAMMER
+    def set_hdpath(self, name, text = None):
+        changed = False
+        old_text = self.hd_paths.get(name)
+        if text:
+            text = text.replace("\n", " ")
+            if old_text != text:
+                self.hd_paths[name] = text
+                changed = True
+        else:
+            if old_text:
+                self.hd_paths.pop(name)
+                changed = True
+
+        if changed:
+            run_hook('set_hdpath', self, name, text)
+            self.storage.put('hd_paths', self.hd_paths)
+
+        return changed
+
+    def get_hdpath(self, tx_hash):
+        return self.hd_paths.get(tx_hash, '')
 
     def is_mine(self, address):
         return address in self.get_addresses()
@@ -1653,12 +1677,38 @@ class Deterministic_Wallet(Abstract_Wallet):
         n = len(addr_list)
         x = self.derive_pubkeys(for_change, n)
         address = self.pubkeys_to_address(x)
+
         addr_list.append(address)
         self.save_addresses()
         self.add_address(address)
         return address
 
+    def create_new_hd_address(self, path):
+        assert type(path) is str
+
+        hd_path = tuple(map(int, path.split(":")))
+        assert len(hd_path) > 0
+
+        addr_list = self.receiving_addresses
+        x = self.derive_pubkeys(False, hd_path)
+        address = self.pubkeys_to_address(x)
+
+        print("create_new_address: "+ address)
+
+        hd_path = self.get_hdpath(address)
+        print(hd_path)
+
+        if address not in addr_list:
+            addr_list.append(address)
+            self.save_addresses()
+            self.add_address(address)
+            self.set_hdpath(address, path)
+
+        return address
+
     def synchronize_sequence(self, for_change):
+        return
+
         limit = self.gap_limit_for_change if for_change else self.gap_limit
         while True:
             addresses = self.get_change_addresses() if for_change else self.get_receiving_addresses()
