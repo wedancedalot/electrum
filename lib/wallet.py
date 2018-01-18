@@ -1693,10 +1693,7 @@ class Deterministic_Wallet(Abstract_Wallet):
         x = self.derive_pubkeys(False, hd_path)
         address = self.pubkeys_to_address(x)
 
-        print("create_new_address: "+ address)
-
         hd_path = self.get_hdpath(address)
-        print(hd_path)
 
         if address not in addr_list:
             addr_list.append(address)
@@ -1707,8 +1704,6 @@ class Deterministic_Wallet(Abstract_Wallet):
         return address
 
     def synchronize_sequence(self, for_change):
-        return
-
         limit = self.gap_limit_for_change if for_change else self.gap_limit
         while True:
             addresses = self.get_change_addresses() if for_change else self.get_receiving_addresses()
@@ -1723,7 +1718,8 @@ class Deterministic_Wallet(Abstract_Wallet):
     def synchronize(self):
         with self.lock:
             if self.is_deterministic():
-                self.synchronize_sequence(False)
+                # Jackhammer: do not create regular addresses
+                # self.synchronize_sequence(False)
                 self.synchronize_sequence(True)
             else:
                 if len(self.receiving_addresses) != len(self.keystore.keypairs):
@@ -1877,11 +1873,20 @@ class Multisig_Wallet(Deterministic_Wallet):
         return ''.join(sorted(self.get_master_public_keys()))
 
     def add_input_sig_info(self, txin, address):
+        for_change, derivation = self.get_address_index(address)
+
+        if not for_change:
+            # Fix for Jackhammer
+            path = self.get_hdpath(address)
+            assert path != ''
+
+            derivation = tuple(map(int, path.split(":")))
+            assert len(derivation) > 0
+
         # x_pubkeys are not sorted here because it would be too slow
         # they are sorted in transaction.get_sorted_pubkeys
         # pubkeys is set to None to signal that x_pubkeys are unsorted
-        derivation = self.get_address_index(address)
-        txin['x_pubkeys'] = [k.get_xpubkey(*derivation) for k in self.get_keystores()]
+        txin['x_pubkeys'] = [k.get_xpubkey(for_change, derivation) for k in self.get_keystores()]
         txin['pubkeys'] = None
         # we need n place holders
         txin['signatures'] = [None] * self.n
