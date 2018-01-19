@@ -1183,6 +1183,7 @@ class Abstract_Wallet(PrintError):
             return
         # hardware wallets require extra info
         if any([(isinstance(k, Hardware_KeyStore) and k.can_sign(tx)) for k in self.get_keystores()]):
+            print("TESTTTTTTTTTT")
             self.add_hw_info(tx)
         # sign
         for k in self.get_keystores():

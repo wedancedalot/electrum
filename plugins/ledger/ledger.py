@@ -304,6 +304,7 @@ class Ledger_KeyStore(Hardware_KeyStore):
 
         # Fetch inputs of the transaction to sign
         derivations = self.get_tx_derivations(tx)
+
         for txin in tx.inputs():
             if txin['type'] == 'coinbase':
                 self.give_error("Coinbase not supported")     # should never happen
@@ -326,7 +327,12 @@ class Ledger_KeyStore(Hardware_KeyStore):
                 if x_pubkey in derivations:
                     signingPos = i
                     s = derivations.get(x_pubkey)
-                    hwAddress = "%s/%d/%d" % (self.get_derivation()[2:], s[0], s[1])
+                    hwAddress = "%s" % (self.get_derivation()[2:])
+
+                    # Jackhammer Fix
+                    for idx in s:
+                        hwAddress += "/%d" % (idx)
+
                     break
             else:
                 self.give_error("No matching x_key for sign_transaction") # should never happen

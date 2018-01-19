@@ -267,8 +267,6 @@ class Xpub:
             dd = dd[MASK_SIZE:]
             s.append(n)
 
-        # JH fix
-        assert len(s) == 3
         return xkey, s
 
     def get_pubkey_derivation(self, x_pubkey):
