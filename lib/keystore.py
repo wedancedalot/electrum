@@ -65,6 +65,7 @@ class KeyStore(PrintError):
                 if not derivation:
                     continue
                 keypairs[x_pubkey] = derivation
+
         return keypairs
 
     def can_sign(self, tx):
@@ -225,10 +226,12 @@ class Xpub:
     def derive_pubkey(self, for_change, n):
         xpub = self.xpub_change if for_change else self.xpub_receive
         if xpub is None:
-            xpub = bip32_public_derivation(self.xpub, "", "/%d"%for_change)
             if for_change:
+                xpub = bip32_public_derivation(self.xpub, "", "/%d"%for_change)
                 self.xpub_change = xpub
             else:
+                # JH FIX: do not build derivation for receive address
+                xpub = self.xpub
                 self.xpub_receive = xpub
 
         # Fix to allow depth
@@ -245,12 +248,17 @@ class Xpub:
             cK, c = CKD_pub(cK, c, i)
         return bh2u(cK)
 
-    def get_xpubkey(self, c, i):
+    # Hacked for Jackhammer: not to build payment addresses from HD xpub
+    def get_xpubkey(self, for_change, i):
         if type(i) != tuple:
             assert type(i) == int
             i = (i,)
 
-        s = ''.join(map(lambda x: bitcoin.int_to_hex(x, MASK_SIZE), (c,) + i))
+        if for_change:
+            s = ''.join(map(lambda x: bitcoin.int_to_hex(x, MASK_SIZE), (for_change,) + i))
+        else:
+            s = ''.join(map(lambda x: bitcoin.int_to_hex(x, MASK_SIZE), i))
+
         return 'ff' + bh2u(bitcoin.DecodeBase58Check(self.xpub)) + s
 
     @classmethod

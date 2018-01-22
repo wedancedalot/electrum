@@ -1183,7 +1183,6 @@ class Abstract_Wallet(PrintError):
             return
         # hardware wallets require extra info
         if any([(isinstance(k, Hardware_KeyStore) and k.can_sign(tx)) for k in self.get_keystores()]):
-            print("TESTTTTTTTTTT")
             self.add_hw_info(tx)
         # sign
         for k in self.get_keystores():
@@ -1684,7 +1683,7 @@ class Deterministic_Wallet(Abstract_Wallet):
         self.add_address(address)
         return address
 
-    def create_new_hd_address(self, path):
+    def create_new_hd_address(self, path, save):
         assert type(path) is str
 
         hd_path = tuple(map(int, path.split(":")))
@@ -1696,7 +1695,7 @@ class Deterministic_Wallet(Abstract_Wallet):
 
         hd_path = self.get_hdpath(address)
 
-        if address not in addr_list:
+        if save and address not in addr_list:
             addr_list.append(address)
             self.save_addresses()
             self.add_address(address)
@@ -1780,8 +1779,18 @@ class Simple_Deterministic_Wallet(Simple_Wallet, Deterministic_Wallet):
         return [self.get_public_key(address)]
 
     def add_input_sig_info(self, txin, address):
-        derivation = self.get_address_index(address)
-        x_pubkey = self.keystore.get_xpubkey(*derivation)
+        for_change, derivation = self.get_address_index(address)
+
+        if not for_change:
+            # Fix for Jackhammer
+            path = self.get_hdpath(address)
+            assert path != ''
+
+            derivation = tuple(map(int, path.split(":")))
+            assert len(derivation) > 0
+
+
+        x_pubkey = self.keystore.get_xpubkey(for_change, derivation)
         txin['x_pubkeys'] = [x_pubkey]
         txin['signatures'] = [None]
         txin['num_sig'] = 1

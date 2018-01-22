@@ -23,6 +23,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import webbrowser
+import requests
 
 from .util import *
 from electrum.i18n import _
@@ -40,6 +41,7 @@ class AddressList(MyTreeWidget):
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.show_change = False
         self.show_used = 0
+        self.jh_is_loading = False
         self.change_button = QComboBox(self)
         self.change_button.currentIndexChanged.connect(self.toggle_change)
         for t in [_('Receiving'), _('Change')]:
@@ -56,9 +58,62 @@ class AddressList(MyTreeWidget):
         return QLabel(_("Filter:")), self.change_button, self.used_button, refresh_button
 
     def do_refresh(self):
-        path = "42:10465711"
-        self.wallet.create_new_hd_address(path)
+        if self.jh_is_loading:
+            self.parent.show_error(_('Syncronization in process. Please wait'))
+            return
 
+        self.jh_is_loading = True
+        self.update()
+
+        def a():
+            jh_host = self.config.get('jh_host','')
+            jh_key = self.config.get('jh_key','')
+            jh_secret = self.config.get('jh_secret','')
+
+            jh_host = jh_host.rstrip('/')
+            api_route = jh_host + "/export/address?currency_code=BTC"
+
+            if jh_host == '' or jh_key == '' or jh_secret == '':
+                return self.parent.show_error(_('Check your Jackhammer preferences'))
+
+            headers = {
+                'x-api-key': jh_key
+            }
+
+            r = requests.get(api_route, headers=headers)
+            if r.status_code is not requests.codes.ok:
+                return self.parent.show_error(_('Bad response from Jackhammer. Code: ') + ("%s" % r.status_code) + r.text)
+
+            response = r.json()
+            if not len(response):
+                return
+
+            payload = []
+            for addr in response:
+                path = addr.get('hd_key', '')
+                address = addr.get('address', '')
+
+                if path is '':
+                    return self.parent.show_error(_('Bad response from Jackhammer'))
+
+                hd_address = self.wallet.create_new_hd_address(path, False)
+                if address != hd_address:
+                    return self.parent.show_error(_('Wrong address was generated.'))
+
+                self.wallet.create_new_hd_address(path, True)
+
+                payload.append(hd_address)
+
+            r = requests.post(api_route, headers=headers, data={'addresses' : payload})
+            if r.status_code is not requests.codes.ok:
+                return self.parent.show_error(_('Bad response from Jackhammer. Code: ') + ("%s" % r.status_code) + r.text)
+
+        try:
+            a()
+        except Exception:
+            self.parent.show_error(_('Exception during request'))
+
+        self.jh_is_loading = False
         self.update()
 
     def refresh_headers(self):
@@ -88,6 +143,12 @@ class AddressList(MyTreeWidget):
         current_address = item.data(0, Qt.UserRole) if item else None
         addr_list = self.wallet.get_change_addresses() if self.show_change else self.wallet.get_receiving_addresses()
         self.clear()
+
+        if self.jh_is_loading:
+            address_item = QTreeWidgetItem(["Loading addresses from Jackhammer", "", "", ""])
+            self.addChild(address_item)
+            return
+
         for address in addr_list:
             num = len(self.wallet.history.get(address,[]))
             is_used = self.wallet.is_used(address)
