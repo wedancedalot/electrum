@@ -26,27 +26,25 @@ import copy
 import datetime
 import json
 
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
-from PyQt5.QtWidgets import *
-
 from electrum.bitcoin import base_encode
 from electrum.i18n import _
 from electrum.plugins import run_hook
-
 from electrum.util import bfh
+
 from .util import *
 
 dialogs = []  # Otherwise python randomly garbage collects the dialogs...
 
-def show_transaction(tx, parent, desc=None, prompt_if_unsaved=False):
-    d = TxDialog(tx, parent, desc, prompt_if_unsaved)
+
+def show_transaction(tx, parent, desc=None, prompt_if_unsaved=False, cryptagio_tx_hash=None):
+    d = TxDialog(tx, parent, desc, prompt_if_unsaved, cryptagio_tx_hash)
     dialogs.append(d)
     d.show()
 
+
 class TxDialog(QDialog, MessageBoxMixin):
 
-    def __init__(self, tx, parent, desc, prompt_if_unsaved):
+    def __init__(self, tx, parent, desc, prompt_if_unsaved, cryptagio_tx_hash):
         '''Transactions in the wallet will show their description.
         Pass desc to give a description for txs not yet in the wallet.
         '''
@@ -62,6 +60,7 @@ class TxDialog(QDialog, MessageBoxMixin):
         self.prompt_if_unsaved = prompt_if_unsaved
         self.saved = False
         self.desc = desc
+        self.cryptagio_tx_hash = cryptagio_tx_hash
 
         self.setMinimumWidth(750)
         self.setWindowTitle(_("Transaction"))
@@ -70,7 +69,7 @@ class TxDialog(QDialog, MessageBoxMixin):
         self.setLayout(vbox)
 
         vbox.addWidget(QLabel(_("Transaction ID:")))
-        self.tx_hash_e  = ButtonsLineEdit()
+        self.tx_hash_e = ButtonsLineEdit()
         qr_show = lambda: parent.show_qrcode(str(self.tx_hash_e.text()), 'Transaction ID', parent=self)
         self.tx_hash_e.addButton(":icons/qrcode.png", qr_show, _("Show as QR code"))
         self.tx_hash_e.setReadOnly(True)
@@ -92,10 +91,11 @@ class TxDialog(QDialog, MessageBoxMixin):
 
         vbox.addStretch(1)
 
-        self.sign_button = b = QPushButton(_("Sign"))
+        self.sign_button = b = QPushButton(_("Sign" if cryptagio_tx_hash is None else "Sign for Peatio"))
         b.clicked.connect(self.sign)
 
-        self.broadcast_button = b = QPushButton(_("Broadcast"))
+        self.broadcast_button = b = QPushButton(
+            _("Broadcast" if cryptagio_tx_hash is None else "Broadcast for Peatio"))
         b.clicked.connect(self.do_broadcast)
 
         self.save_button = b = QPushButton(_("Save"))
@@ -129,6 +129,9 @@ class TxDialog(QDialog, MessageBoxMixin):
         self.main_window.push_top_level_window(self)
         try:
             self.main_window.broadcast_transaction(self.tx, self.desc)
+
+            if self.cryptagio_tx_hash is not None:
+                self.main_window.cryptagio.approve_tx(self.cryptagio_tx_hash)
         finally:
             self.main_window.pop_top_level_window(self)
         self.saved = True
@@ -136,7 +139,7 @@ class TxDialog(QDialog, MessageBoxMixin):
 
     def closeEvent(self, event):
         if (self.prompt_if_unsaved and not self.saved
-            and not self.question(_('This transaction is not saved. Close anyway?'), title=_("Warning"))):
+                and not self.question(_('This transaction is not saved. Close anyway?'), title=_("Warning"))):
             event.ignore()
         else:
             event.accept()
@@ -155,6 +158,11 @@ class TxDialog(QDialog, MessageBoxMixin):
             if success:
                 self.prompt_if_unsaved = True
                 self.saved = False
+
+                # if not self.tx.is_complete() and self.cryptagio_tx_hash is not None:
+                if self.cryptagio_tx_hash is not None:
+                    self.cryptagio_tx_hash = self.main_window.cryptagio.update_tx(self.tx, self.cryptagio_tx_hash)
+
             self.update()
             self.main_window.pop_top_level_window(self)
 
@@ -175,11 +183,17 @@ class TxDialog(QDialog, MessageBoxMixin):
         desc = self.desc
         base_unit = self.main_window.base_unit()
         format_amount = self.main_window.format_amount
-        tx_hash, status, label, can_broadcast, can_rbf, amount, fee, height, conf, timestamp, exp_n = self.wallet.get_tx_info(self.tx)
+        tx_hash, status, label, can_broadcast, can_rbf, amount, fee, height, conf, timestamp, exp_n = self.wallet.get_tx_info(
+            self.tx)
         size = self.tx.estimated_size()
+
+        print("UPDATE!")
+        print(can_broadcast)
+        print("UPDATE!")
+
         self.broadcast_button.setEnabled(can_broadcast)
         can_sign = not self.tx.is_complete() and \
-            (self.wallet.can_sign(self.tx) or bool(self.main_window.tx_external_keypairs))
+                   (self.wallet.can_sign(self.tx) or bool(self.main_window.tx_external_keypairs))
         self.sign_button.setEnabled(can_sign)
         self.tx_hash_e.setText(tx_hash or _('Unknown'))
         if desc is None:
@@ -191,10 +205,10 @@ class TxDialog(QDialog, MessageBoxMixin):
 
         if timestamp:
             time_str = datetime.datetime.fromtimestamp(timestamp).isoformat(' ')[:-3]
-            self.date_label.setText(_("Date: %s")%time_str)
+            self.date_label.setText(_("Date: %s") % time_str)
             self.date_label.show()
         elif exp_n:
-            text = '%d blocks'%(exp_n) if exp_n > 0 else _('unknown (low fee)')
+            text = '%d blocks' % (exp_n) if exp_n > 0 else _('unknown (low fee)')
             self.date_label.setText(_('Expected confirmation time') + ': ' + text)
             self.date_label.show()
         else:
@@ -202,13 +216,13 @@ class TxDialog(QDialog, MessageBoxMixin):
         if amount is None:
             amount_str = _("Transaction unrelated to your wallet")
         elif amount > 0:
-            amount_str = _("Amount received:") + ' %s'% format_amount(amount) + ' ' + base_unit
+            amount_str = _("Amount received:") + ' %s' % format_amount(amount) + ' ' + base_unit
         else:
-            amount_str = _("Amount sent:") + ' %s'% format_amount(-amount) + ' ' + base_unit
-        size_str = _("Size:") + ' %d bytes'% size
-        fee_str = _("Fee") + ': %s'% (format_amount(fee) + ' ' + base_unit if fee is not None else _('unknown'))
+            amount_str = _("Amount sent:") + ' %s' % format_amount(-amount) + ' ' + base_unit
+        size_str = _("Size:") + ' %d bytes' % size
+        fee_str = _("Fee") + ': %s' % (format_amount(fee) + ' ' + base_unit if fee is not None else _('unknown'))
         if fee is not None:
-            fee_str += '  ( %s ) '%  self.main_window.format_fee_rate(fee/size*1000)
+            fee_str += '  ( %s ) ' % self.main_window.format_fee_rate(fee / size * 1000)
         self.amount_label.setText(amount_str)
         self.fee_label.setText(fee_str)
         self.size_label.setText(size_str)
@@ -218,7 +232,7 @@ class TxDialog(QDialog, MessageBoxMixin):
         if self.tx.locktime > 0:
             vbox.addWidget(QLabel("LockTime: %d\n" % self.tx.locktime))
 
-        vbox.addWidget(QLabel(_("Inputs") + ' (%d)'%len(self.tx.inputs())))
+        vbox.addWidget(QLabel(_("Inputs") + ' (%d)' % len(self.tx.inputs())))
         ext = QTextCharFormat()
         rec = QTextCharFormat()
         rec.setBackground(QBrush(ColorScheme.GREEN.as_color(background=True)))
@@ -233,7 +247,7 @@ class TxDialog(QDialog, MessageBoxMixin):
             return ext
 
         def format_amount(amt):
-            return self.main_window.format_amount(amt, whitespaces = True)
+            return self.main_window.format_amount(amt, whitespaces=True)
 
         i_text = QTextEdit()
         i_text.setFont(QFont(MONOSPACE_FONT))
@@ -261,7 +275,7 @@ class TxDialog(QDialog, MessageBoxMixin):
             cursor.insertBlock()
 
         vbox.addWidget(i_text)
-        vbox.addWidget(QLabel(_("Outputs") + ' (%d)'%len(self.tx.outputs())))
+        vbox.addWidget(QLabel(_("Outputs") + ' (%d)' % len(self.tx.outputs())))
         o_text = QTextEdit()
         o_text.setFont(QFont(MONOSPACE_FONT))
         o_text.setReadOnly(True)

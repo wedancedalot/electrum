@@ -59,7 +59,7 @@ class AddressList(MyTreeWidget):
 
     def do_refresh(self):
         if self.jh_is_loading:
-            self.parent.show_error(_('Syncronization in process. Please wait'))
+            self.parent.show_error(_('Synchronization in process. Please wait'))
             return
 
         self.jh_is_loading = True
@@ -68,12 +68,13 @@ class AddressList(MyTreeWidget):
         def a():
             jh_host = self.config.get('jh_host','')
             jh_key = self.config.get('jh_key','')
-            jh_secret = self.config.get('jh_secret','')
+            # jh_secret = self.config.get('jh_secret','')
 
             jh_host = jh_host.rstrip('/')
             api_route = jh_host + "/export/address?currency_code=BTC"
 
-            if jh_host == '' or jh_key == '' or jh_secret == '':
+            # if jh_host == '' or jh_key == '' or jh_secret == '':
+            if jh_host == '' or jh_key == '':
                 return self.parent.show_error(_('Check your Jackhammer preferences'))
 
             headers = {
@@ -93,7 +94,7 @@ class AddressList(MyTreeWidget):
                 path = addr.get('hd_key', '')
                 address = addr.get('address', '')
 
-                if path is '':
+                if path == '':
                     return self.parent.show_error(_('Bad response from Jackhammer'))
 
                 hd_address = self.wallet.create_new_hd_address(path, False)
