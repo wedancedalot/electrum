@@ -766,9 +766,9 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         d = address_dialog.AddressDialog(self, addr)
         d.exec_()
 
-    def show_transaction(self, tx, tx_desc=None, cryptagio_tx_hash=None):
+    def show_transaction(self, tx, tx_desc=None, cryptagio_tx_id=None, cryptagio_tx_hash=None):
         '''tx_desc is set only for txs created in the Send tab'''
-        show_transaction(tx, self, tx_desc, cryptagio_tx_hash=cryptagio_tx_hash)
+        show_transaction(tx, self, tx_desc, cryptagio_tx_id=cryptagio_tx_id, cryptagio_tx_hash=cryptagio_tx_hash)
 
     def create_receive_tab(self):
         # A 4-column grid layout.  All the stretch is in the last column.
@@ -1489,61 +1489,79 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
     def do_cryptagio(self):
         if run_hook('abort_send', self):
             return
+        tx_hash, fee, tx_body = self.cryptagio.check_for_uncorfimed_tx()
 
-        tx_hash, outputs = self.cryptagio.get_outputs()
         tx_desc = self.message_e.text()
 
-        if self.payto_e.is_alias and self.payto_e.validated is False:
-            alias = self.payto_e.toPlainText()
-            msg = _(
-                'WARNING: the alias "%s" could not be validated via an additional security check, DNSSEC, and thus may not be correct.' % alias) + '\n'
-            msg += _('Do you wish to continue?')
-            if not self.question(msg):
+        if not tx_hash is None or not fee is None or not tx_body is None:
+            from electrum.transaction import SerializationError
+            try:
+                tx = self.tx_from_text(tx_body)
+                if tx:
+                    self.show_transaction(tx, tx_desc, self.cryptagio.tx_id, self.cryptagio.tx_body_hash)
+            except SerializationError as e:
+                self.show_critical(_("Electrum was unable to deserialize the transaction:") + "\n" + str(e))
+            return
+        else:
+            tx_hash, outputs = self.cryptagio.get_outputs()
+            tx_desc = self.message_e.text()
+
+            if self.payto_e.is_alias and self.payto_e.validated is False:
+                alias = self.payto_e.toPlainText()
+                msg = _(
+                    'WARNING: the alias "%s" could not be validated via an additional security check, DNSSEC, and thus may not be correct.' % alias) + '\n'
+                msg += _('Do you wish to continue?')
+                if not self.question(msg):
+                    return
+
+            if not outputs:
+                self.show_error(_('No outputs'))
                 return
 
-        if not outputs:
-            self.show_error(_('No outputs'))
-            return
+            for _type, addr, amount in outputs:
+                if addr is None:
+                    self.show_error(_('Bitcoin Address is None'))
+                    return
+                if _type == TYPE_ADDRESS and not bitcoin.is_address(addr):
+                    self.show_error(_('Invalid Bitcoin Address'))
+                    return
+                if amount is None:
+                    self.show_error(_('Invalid Amount'))
+                    return
 
-        for _type, addr, amount in outputs:
-            if addr is None:
-                self.show_error(_('Bitcoin Address is None'))
+            fee_estimator = self.get_send_fee_estimator()
+            coins = self.get_coins()
+
+            fee = 0
+            while fee == 0 or fee > self.cryptagio.max_fee_amount:
+                try:
+                    is_sweep = bool(self.tx_external_keypairs)
+                    if fee > self.cryptagio.max_fee_amount:
+                        fee_estimator = self.cryptagio.max_fee_amount
+
+                    tx = self.wallet.make_unsigned_transaction(
+                        coins, outputs, self.config, fixed_fee=fee_estimator,
+                        is_sweep=is_sweep)
+                except NotEnoughFunds:
+                    self.show_message(_("Insufficient funds"))
+                    return
+                except BaseException as e:
+                    traceback.print_exc(file=sys.stdout)
+                    self.show_message(str(e))
+                    return
+
+                amount = tx.output_value() if self.is_max else sum(map(lambda x: x[2], outputs))
+                fee = tx.get_fee()
+
+            use_rbf = self.config.get('use_rbf', True)
+            if use_rbf:
+                tx.set_rbf(True)
+
+            if fee < self.wallet.relayfee() * tx.estimated_size():
+                self.show_error(_("This transaction requires a higher fee, or it will not be propagated by the network"))
                 return
-            if _type == TYPE_ADDRESS and not bitcoin.is_address(addr):
-                self.show_error(_('Invalid Bitcoin Address'))
-                return
-            if amount is None:
-                self.show_error(_('Invalid Amount'))
-                return
 
-        fee_estimator = self.get_send_fee_estimator()
-        coins = self.get_coins()
-
-        try:
-            is_sweep = bool(self.tx_external_keypairs)
-            tx = self.wallet.make_unsigned_transaction(
-                coins, outputs, self.config, fixed_fee=fee_estimator,
-                is_sweep=is_sweep)
-        except NotEnoughFunds:
-            self.show_message(_("Insufficient funds"))
-            return
-        except BaseException as e:
-            traceback.print_exc(file=sys.stdout)
-            self.show_message(str(e))
-            return
-
-        amount = tx.output_value() if self.is_max else sum(map(lambda x: x[2], outputs))
-        fee = tx.get_fee()
-
-        use_rbf = self.config.get('use_rbf', True)
-        if use_rbf:
-            tx.set_rbf(True)
-
-        if fee < self.wallet.relayfee() * tx.estimated_size() / 1000:
-            self.show_error(_("This transaction requires a higher fee, or it will not be propagated by the network"))
-            return
-
-        self.show_transaction(tx, tx_desc, tx_hash)
+            self.show_transaction(tx, tx_desc, self.cryptagio.tx_id, self.cryptagio.tx_body_hash) #tx_hash
 
     def do_send(self, preview=False):
         if run_hook('abort_send', self):
@@ -2703,6 +2721,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
     def settings_dialog(self):
         self.need_restart = False
         d = WindowModalDialog(self, _('Preferences'))
+        d.setMinimumSize(500, 200)
         vbox = QVBoxLayout()
         tabs = QTabWidget()
         gui_widgets = []
@@ -3075,6 +3094,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
         # Jackhammer
         jh_host_label = HelpLabel(_('JH Host') + ':', _('Address of JH including port.'))
         jh_host_e = QLineEdit(self.config.get('jh_host', ''))
+        jh_host_e.setFixedWidth(300)
 
         def on_jh_host_edit():
             self.config.set_key('jh_host', str(jh_host_e.text()), True)

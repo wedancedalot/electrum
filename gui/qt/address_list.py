@@ -66,12 +66,13 @@ class AddressList(MyTreeWidget):
         self.update()
 
         def a():
-            jh_host = self.config.get('jh_host','')
-            jh_key = self.config.get('jh_key','')
+            currency = "BTC"
+            jh_host = self.config.get('jh_host', '')
+            jh_key = self.config.get('jh_key', '')
             # jh_secret = self.config.get('jh_secret','')
 
             jh_host = jh_host.rstrip('/')
-            api_route = jh_host + "/export/address?currency_code=BTC"
+            api_route = jh_host + "/export/address/"+currency
 
             # if jh_host == '' or jh_key == '' or jh_secret == '':
             if jh_host == '' or jh_key == '':
@@ -86,11 +87,13 @@ class AddressList(MyTreeWidget):
                 return self.parent.show_error(_('Bad response from Jackhammer. Code: ') + ("%s" % r.status_code) + r.text)
 
             response = r.json()
-            if not len(response):
+            print(response)
+            if response is None or not len(response):
                 return
 
             payload = []
             for addr in response:
+                print(addr)
                 path = addr.get('hd_key', '')
                 address = addr.get('address', '')
 
@@ -109,10 +112,12 @@ class AddressList(MyTreeWidget):
             if r.status_code is not requests.codes.ok:
                 return self.parent.show_error(_('Bad response from Jackhammer. Code: ') + ("%s" % r.status_code) + r.text)
 
+
         try:
             a()
-        except Exception:
-            self.parent.show_error(_('Exception during request'))
+        except Exception as e:
+            print(e)
+            self.parent.show_error(_('Exception during request '))
 
         self.jh_is_loading = False
         self.update()
