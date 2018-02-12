@@ -1,5 +1,6 @@
 import requests
 from electrum.i18n import _
+from decimal import Decimal
 
 
 class Cryptagio(object):
@@ -45,7 +46,7 @@ class Cryptagio(object):
                 return None, None, None
             self.tx_id = response['Id']
             self.tx_body_hash = response['TxbodyHash']
-            self.max_fee_amount = response['MaxFee']
+            self.max_fee_amount = Decimal(response['MaxFee'])*1000 #in uBTC
             return response['TxHash'], response['Fee'], response['Txbody']
 
         tx_hash, fee, tx_body = None, None, None
@@ -66,6 +67,7 @@ class Cryptagio(object):
         self.is_loading = True
 
         def make_request():
+            outputs = []
             self.set_params()
             if self.cryptagio_host == '' or self.cryptagio_key == '':
                 return self.parent.show_error(_('Check your Cryptagio preferences'))
@@ -81,25 +83,24 @@ class Cryptagio(object):
             response = r.json()
 
             if not len(response.get('requests', [])):
-                return self.parent.show_info(_('No pending withdrawal requests for your key'))
+                return self.parent.show_message(_('No new withdrawal requests yet'))
 
             self.tx_id = response.get('tx_id', 0)
             if not self.tx_id:
                 return self.parent.show_error(_('No tx_id in Cryptagio response'))
 
-            self.max_fee_amount = response.get('max_fee_amount', 0)
+            self.max_fee_amount = Decimal(response.get('max_fee_amount', 0))*1000 #in uBTC
             if not self.max_fee_amount:
                 return self.parent.show_error(_('No max_fee_amount in Cryptagio response'))
 
-            outputs = []
             for item in response.get('requests', []):
                 address = item.get('address', '')
                 amount = int(item.get('amount', ''))
                 if address == '' or amount == '':
                     return self.parent.show_error(_('Bad response from Cryptagio. Address or amount is empty'))
 
-                type, address = self.parent.payto_e.parse_output(address)
-                outputs.append((type, address, amount))
+                obj_type, address = self.parent.payto_e.parse_output(address)
+                outputs.append((obj_type, address, amount))
 
             return outputs
 
@@ -107,11 +108,11 @@ class Cryptagio(object):
         try:
             outputs = make_request()
         except Exception as err:
-            self.parent.show_error(_('Exception during request'))
+            print(err)
+            self.parent.show_error(_('Exception during get_outputs request'))
 
         self.is_loading = False
-
-        return "some hash", outputs
+        return outputs
 
     def update_tx(self, tx_id, tx_hash, fee, tx_body, tx_prev_body_hash):
         if self.is_loading:

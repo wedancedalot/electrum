@@ -51,6 +51,9 @@ from electrum import util, bitcoin, commands, coinchooser
 from electrum import paymentrequest
 from electrum.wallet import Multisig_Wallet
 
+from decimal import *
+from numbers import Number
+
 try:
     from electrum.plot import plot_history
 except:
@@ -1503,7 +1506,7 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
                 self.show_critical(_("Electrum was unable to deserialize the transaction:") + "\n" + str(e))
             return
         else:
-            tx_hash, outputs = self.cryptagio.get_outputs()
+            outputs = self.cryptagio.get_outputs()
             tx_desc = self.message_e.text()
 
             if self.payto_e.is_alias and self.payto_e.validated is False:
@@ -1513,9 +1516,8 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
                 msg += _('Do you wish to continue?')
                 if not self.question(msg):
                     return
-
-            if not outputs:
-                self.show_error(_('No outputs'))
+            if not outputs or type(outputs) != list:
+                #nothing to do here
                 return
 
             for _type, addr, amount in outputs:
@@ -1532,16 +1534,15 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
             fee_estimator = self.get_send_fee_estimator()
             coins = self.get_coins()
 
-            fee = 0
-            while fee == 0 or fee > self.cryptagio.max_fee_amount:
+            max_fee_satoshi = int(self.cryptagio.max_fee_amount * pow(10, 8))
+            while (not fee) or (fee > max_fee_satoshi):
+                is_sweep = bool(self.tx_external_keypairs)
+                # fee_estimator = None
+                if fee and fee > max_fee_satoshi:
+                    fee_estimator = max_fee_satoshi
                 try:
-                    is_sweep = bool(self.tx_external_keypairs)
-                    if fee > self.cryptagio.max_fee_amount:
-                        fee_estimator = self.cryptagio.max_fee_amount
-
                     tx = self.wallet.make_unsigned_transaction(
-                        coins, outputs, self.config, fixed_fee=fee_estimator,
-                        is_sweep=is_sweep)
+                        coins, outputs, self.config, fixed_fee=fee_estimator, is_sweep=is_sweep)
                 except NotEnoughFunds:
                     self.show_message(_("Insufficient funds"))
                     return
@@ -1549,15 +1550,15 @@ class ElectrumWindow(QMainWindow, MessageBoxMixin, PrintError):
                     traceback.print_exc(file=sys.stdout)
                     self.show_message(str(e))
                     return
-
-                amount = tx.output_value() if self.is_max else sum(map(lambda x: x[2], outputs))
                 fee = tx.get_fee()
+
+            amount = tx.output_value() if self.is_max else sum(map(lambda x: x[2], outputs))
 
             use_rbf = self.config.get('use_rbf', True)
             if use_rbf:
                 tx.set_rbf(True)
 
-            if fee < self.wallet.relayfee() * tx.estimated_size():
+            if fee < self.wallet.relayfee() * tx.estimated_size() / 1000 :
                 self.show_error(_("This transaction requires a higher fee, or it will not be propagated by the network"))
                 return
 
