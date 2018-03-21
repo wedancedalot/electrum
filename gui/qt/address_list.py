@@ -23,13 +23,14 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 import webbrowser
+
 import requests
+from electrum.bitcoin import is_address
+from electrum.i18n import _
+from electrum.plugins import run_hook
+from electrum.util import block_explorer_URL
 
 from .util import *
-from electrum.i18n import _
-from electrum.util import block_explorer_URL
-from electrum.plugins import run_hook
-from electrum.bitcoin import is_address
 
 
 class AddressList(MyTreeWidget):
@@ -67,51 +68,42 @@ class AddressList(MyTreeWidget):
 
         def a():
             currency = "BTC"
-            jh_host = self.config.get('jh_host', '')
+            jh_host = self.config.get('jh_host', '').rstrip('/')
             jh_key = self.config.get('jh_key', '')
-            # jh_secret = self.config.get('jh_secret','')
-
-            jh_host = jh_host.rstrip('/')
-            api_route = jh_host + "/export/address/"+currency
-
-            # if jh_host == '' or jh_key == '' or jh_secret == '':
-            if jh_host == '' or jh_key == '':
-                return self.parent.show_error(_('Check your Jackhammer preferences'))
 
             headers = {
                 'x-api-key': jh_key
             }
 
-            r = requests.get(api_route, headers=headers)
-            if r.status_code is not requests.codes.ok:
-                return self.parent.show_error(_('Bad response from Jackhammer. Code: ') + ("%s" % r.status_code) + r.text)
+            lastId = 0
+            while True:
+                api_route = jh_host + "/export/address/" + currency + "?last_id=" + str(lastId)
+                if jh_host == '' or jh_key == '':
+                    return self.parent.show_error(_('Check your Jackhammer preferences'))
 
-            response = r.json()
-            print(response)
-            if response is None or not len(response):
-                return
+                r = requests.get(api_route, headers=headers)
+                if r.status_code is not requests.codes.ok:
+                    return self.parent.show_error(_('Bad response from Jackhammer. Code: ') + ("%s" % r.status_code) + r.text)
 
-            payload = []
-            for addr in response:
-                print(addr)
-                path = addr.get('hd_key', '')
-                address = addr.get('address', '')
+                response = r.json()
+                if response is None or not len(response):
+                    return
 
-                if path == '':
-                    return self.parent.show_error(_('Bad response from Jackhammer'))
+                for addr in response:
+                    path = addr.get('hd_key', '')
+                    address = addr.get('address', '')
 
-                hd_address = self.wallet.create_new_hd_address(path, False)
-                if address != hd_address:
-                    return self.parent.show_error(_('Wrong address was generated.'))
+                    if path == '':
+                        return self.parent.show_error(_('Bad response from Jackhammer'))
 
-                self.wallet.create_new_hd_address(path, True)
+                    hd_address = self.wallet.create_new_hd_address(path, False)
+                    if address != hd_address:
+                        return self.parent.show_error(_('Wrong address was generated. Check if your masterxpub matches'))
 
-                payload.append(hd_address)
-
-            r = requests.post(api_route, headers=headers, data={'addresses' : payload})
-            if r.status_code is not requests.codes.ok:
-                return self.parent.show_error(_('Bad response from Jackhammer. Code: ') + ("%s" % r.status_code) + r.text)
-
+                    self.wallet.create_new_hd_address(path, True)
+                    lastId = addr.get('id', 0)
+                    if lastId == 0:
+                        return
 
         try:
             a()
@@ -123,10 +115,10 @@ class AddressList(MyTreeWidget):
         self.update()
 
     def refresh_headers(self):
-        headers = [ _('Address'), _('Label'), _('Balance')]
+        headers = [_('Address'), _('Label'), _('Balance')]
         fx = self.parent.fx
         if fx and fx.get_fiat_address_config():
-            headers.extend([_(fx.get_currency()+' Balance')])
+            headers.extend([_(fx.get_currency() + ' Balance')])
         headers.extend([_('Tx')])
         self.update_headers(headers)
 
@@ -156,7 +148,7 @@ class AddressList(MyTreeWidget):
             return
 
         for address in addr_list:
-            num = len(self.wallet.history.get(address,[]))
+            num = len(self.wallet.history.get(address, []))
             is_used = self.wallet.is_used(address)
             label = self.wallet.labels.get(address, '')
             c, u, x = self.wallet.get_addr_balance(address)
@@ -172,14 +164,14 @@ class AddressList(MyTreeWidget):
             if fx and fx.get_fiat_address_config():
                 rate = fx.exchange_rate()
                 fiat_balance = fx.value_str(balance, rate)
-                address_item = QTreeWidgetItem([address, label, balance_text, fiat_balance, "%d"%num])
+                address_item = QTreeWidgetItem([address, label, balance_text, fiat_balance, "%d" % num])
                 address_item.setTextAlignment(3, Qt.AlignRight)
             else:
-                address_item = QTreeWidgetItem([address, label, balance_text, "%d"%num])
+                address_item = QTreeWidgetItem([address, label, balance_text, "%d" % num])
                 address_item.setTextAlignment(2, Qt.AlignRight)
             address_item.setFont(0, QFont(MONOSPACE_FONT))
             address_item.setData(0, Qt.UserRole, address)
-            address_item.setData(0, Qt.UserRole+1, True) # label can be edited
+            address_item.setData(0, Qt.UserRole + 1, True)  # label can be edited
             if self.wallet.is_frozen(address):
                 address_item.setBackground(0, ColorScheme.BLUE.as_color(True))
             if self.wallet.is_beyond_limit(address, self.show_change):
@@ -211,10 +203,10 @@ class AddressList(MyTreeWidget):
         if not multi_select:
             column_title = self.headerItem().text(col)
             copy_text = item.text(col)
-            menu.addAction(_("Copy %s")%column_title, lambda: self.parent.app.clipboard().setText(copy_text))
+            menu.addAction(_("Copy %s") % column_title, lambda: self.parent.app.clipboard().setText(copy_text))
             menu.addAction(_('Details'), lambda: self.parent.show_address(addr))
             if col in self.editable_columns:
-                menu.addAction(_("Edit %s")%column_title, lambda: self.editItem(item, col))
+                menu.addAction(_("Edit %s") % column_title, lambda: self.editItem(item, col))
             menu.addAction(_("Request payment"), lambda: self.parent.receive_at(addr))
             if self.wallet.can_export():
                 menu.addAction(_("Private key"), lambda: self.parent.show_private_key(addr))
